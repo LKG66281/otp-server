@@ -1,31 +1,21 @@
 const express = require('express');
-const WebSocket = require('ws');
 const sqlite3 = require('sqlite3').verbose();
+const WebSocket = require('ws');
 const nodemailer = require('nodemailer');
-const rateLimit = require('express-rate-limit');
-const helmet = require('helmet');
-const path = require('path');
 const app = express();
-const wss = new WebSocket.Server({ port: 8080 });
-const db = new sqlite3.Database(path.join(__dirname, 'data', 'mydb.db'), (err) => {
-  if (err) console.error('Database error:', err);
-});
+const port = process.env.PORT || 3000;
 
+// Middleware
 app.use(express.json());
-app.use(helmet());
-app.use('/send-otp', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }));
+app.use('/apk', express.static('static')); // Serve APK from static folder
 
-const transporter = nodemailer.createTransport({
-  host: 'localhost',
-  port: 25,
-  secure: false,
-});
+// In-memory SQLite database
+const db = new sqlite3.Database(':memory:');
 
-const clients = new Map();
-
+// Initialize database schema
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
+    userId TEXT PRIMARY KEY,
     phone TEXT UNIQUE,
     email TEXT UNIQUE
   )`);
@@ -38,102 +28,131 @@ db.serialize(() => {
   )`);
 });
 
-setInterval(() => {
-  db.run(`DELETE FROM otps WHERE expires_at < ?`, [new Date()], (err) => {
-    if (err) console.error('Cleanup error:', err);
-  });
-}, 60 * 60 * 1000);
-
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+// WebSocket server
+const wss = new WebSocket.Server({ port: 8080 });
+const clients = new Map(); // Store WebSocket clients by userId
 
 wss.on('connection', (ws, req) => {
-  const userId = new URLSearchParams(req.url.split('?')[1]).get('userId');
+  const params = new URLSearchParams(req.url.split('?')[1]);
+  const userId = params.get('userId');
   if (userId) {
-    const existingClient = clients.get(userId);
-    if (existingClient) existingClient.close();
     clients.set(userId, ws);
-    ws.on('close', () => clients.delete(userId));
-    ws.on('error', () => clients.delete(userId));
     ws.send(JSON.stringify({ message: 'Connected' }));
+    ws.on('close', () => clients.delete(userId));
   } else {
     ws.close();
   }
 });
 
+// Nodemailer setup for email
+const transporter = nodemailer.createTransport({
+  sendmail: true,
+  newline: 'unix',
+  path: '/usr/sbin/sendmail'
+});
+
+// Generate OTP
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Register user
 app.post('/register', (req, res) => {
   const { userId, phone, email } = req.body;
-  if (!userId || !phone || !email) return res.status(400).json({ error: 'Missing userId, phone, or email' });
+  if (!userId || !phone || !email) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
   db.run(
-    `INSERT OR IGNORE INTO users (id, phone, email) VALUES (?, ?, ?)`,
+    `INSERT INTO users (userId, phone, email) VALUES (?, ?, ?)`,
     [userId, phone, email],
-    (err) => {
-      if (err) return res.status(500).json({ error: 'Database error' });
+    function (err) {
+      if (err) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
       res.json({ message: 'User registered' });
     }
   );
 });
 
-app.post('/send-otp', async (req, res) => {
+// Send OTP
+app.post('/send-otp', (req, res) => {
   const { userId, method } = req.body;
-  if (!userId || !method || !['push', 'email'].includes(method)) {
-    return res.status(400).json({ error: 'Invalid userId or method' });
+  if (!userId || !method) {
+    return res.status(400).json({ error: 'Missing userId or method' });
   }
-  const otp = generateOTP();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-  db.get(`SELECT id, email FROM users WHERE id = ?`, [userId], async (err, user) => {
-    if (err || !user) return res.status(404).json({ error: 'User not found' });
+  db.get(`SELECT * FROM users WHERE userId = ?`, [userId], (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const otp = generateOTP();
+    const createdAt = Date.now();
+    const expiresAt = createdAt + 10 * 60 * 1000; // 10 minutes expiry
+
     db.run(
       `INSERT INTO otps (user_id, otp, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-      [userId, otp, new Date(), expiresAt],
-      async (err) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        if (method === 'push') {
-          const client = clients.get(userId);
-          if (client && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ otp, expiresAt }));
-            return res.json({ message: 'OTP sent via push' });
-          } else {
-            return res.status(400).json({ error: 'User not connected' });
-          }
+      [userId, otp, createdAt, expiresAt],
+      (err) => {
+        if (err) {
+          return res.status(500).json({ error: 'Failed to store OTP' });
+        }
+
+        if (method === 'push' && clients.has(userId)) {
+          const ws = clients.get(userId);
+          ws.send(JSON.stringify({ otp, expiresAt }));
+          res.json({ message: 'OTP sent via push' });
         } else if (method === 'email') {
-          try {
-            await transporter.sendMail({
-              from: 'no-reply@yourdomain.com',
-              to: user.email,
-              subject: 'Your OTP Code',
-              text: `Your OTP is ${otp}. Expires in 5 minutes.`,
-            });
-            return res.json({ message: 'OTP sent via email' });
-          } catch (error) {
-            console.error('Email error:', err);
-            return res.status(500).json({ error: 'Failed to send email' });
-          }
+          const mailOptions = {
+            from: 'otp@otp-server-lkg66281.onrender.com',
+            to: user.email,
+            subject: 'Your OTP Code',
+            text: `Your OTP is ${otp}. It expires at ${new Date(expiresAt).toLocaleString()}.`
+          };
+          transporter.sendMail(mailOptions, (error) => {
+            if (error) {
+              return res.status(500).json({ error: 'Failed to send email' });
+            }
+            res.json({ message: 'OTP sent via email' });
+          });
+        } else {
+          res.status(400).json({ error: 'Invalid method or user not connected' });
         }
       }
     );
   });
 });
 
+// Verify OTP
 app.post('/verify-otp', (req, res) => {
   const { userId, otp } = req.body;
-  if (!userId || !otp) return res.status(400).json({ error: 'Missing userId or OTP' });
+  if (!userId || !otp) {
+    return res.status(400).json({ error: 'Missing userId or otp' });
+  }
+
   db.get(
     `SELECT * FROM otps WHERE user_id = ? AND otp = ? AND expires_at > ?`,
-    [userId, otp, new Date()],
+    [userId, otp, Date.now()],
     (err, row) => {
-      if (err || !row) return res.status(400).json({ error: 'Invalid or expired OTP' });
+      if (err || !row) {
+        return res.status(400).json({ error: 'Invalid or expired OTP' });
+      }
       db.run(`DELETE FROM otps WHERE id = ?`, [row.id], (err) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) {
+          return res.status(500).json({ error: 'Failed to clear OTP' });
+        }
         res.json({ message: 'OTP verified' });
       });
     }
   );
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server running on port ${port}`));
+// Start server
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
