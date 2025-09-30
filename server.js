@@ -44,11 +44,13 @@ wss.on('connection', (ws, req) => {
   }
 });
 
-// Nodemailer setup for email
+// Nodemailer setup for Gmail SMTP
 const transporter = nodemailer.createTransport({
-  sendmail: true,
-  newline: 'unix',
-  path: '/usr/sbin/sendmail'
+  service: 'gmail',
+  auth: {
+    user: 'gamer.lkg.2.0@gmail.com',
+    pass: 'your-app-password' // Replace with your 16-character App Password
+  }
 });
 
 // Generate OTP
@@ -109,13 +111,14 @@ app.post('/send-otp', (req, res) => {
           res.json({ message: 'OTP sent via push' });
         } else if (method === 'email') {
           const mailOptions = {
-            from: 'otp@otp-server-lkg66281.onrender.com',
+            from: 'gamer.lkg.2.0@gmail.com',
             to: user.email,
             subject: 'Your OTP Code',
             text: `Your OTP is ${otp}. It expires at ${new Date(expiresAt).toLocaleString()}.`
           };
           transporter.sendMail(mailOptions, (error) => {
             if (error) {
+              console.error('Email error:', error);
               return res.status(500).json({ error: 'Failed to send email' });
             }
             res.json({ message: 'OTP sent via email' });
