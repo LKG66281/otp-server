@@ -49,7 +49,7 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: 'gamer.lkg.2.0@gmail.com',
-    pass: 'your-app-password' // Replace with your 16-character App Password
+    pass: 'acgyefzeutrtiit' // Replace with your 16-character App Password
   }
 });
 
