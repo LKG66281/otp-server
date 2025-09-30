@@ -7,7 +7,7 @@ const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
-app.use('/apk', express.static('static')); // Serve APK from static folder
+app.use('/apk', express.static('static'));
 
 // In-memory SQLite database
 const db = new sqlite3.Database(':memory:');
@@ -28,11 +28,10 @@ db.serialize(() => {
   )`);
 });
 
-// Create HTTP server and attach WebSocket server to it
+// Create HTTP server and attach WebSocket
 const server = require('http').createServer(app);
-const wss = new WebSocket.Server({ server }); // Attach WebSocket to HTTP server (same port)
-
-const clients = new Map(); // Store WebSocket clients by userId
+const wss = new WebSocket.Server({ server });
+const clients = new Map();
 
 wss.on('connection', (ws, req) => {
   const params = new URLSearchParams(req.url.split('?')[1]);
@@ -97,7 +96,7 @@ app.post('/send-otp', (req, res) => {
 
     const otp = generateOTP();
     const createdAt = Date.now();
-    const expiresAt = createdAt + 10 * 60 * 1000; // 10 minutes expiry
+    const expiresAt = createdAt + 10 * 60 * 1000;
 
     db.run(
       `INSERT INTO otps (user_id, otp, created_at, expires_at) VALUES (?, ?, ?, ?)`,
