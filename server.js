@@ -28,8 +28,10 @@ db.serialize(() => {
   )`);
 });
 
-// WebSocket server
-const wss = new WebSocket.Server({ port: 8080 });
+// Create HTTP server and attach WebSocket server to it
+const server = require('http').createServer(app);
+const wss = new WebSocket.Server({ server }); // Attach WebSocket to HTTP server (same port)
+
 const clients = new Map(); // Store WebSocket clients by userId
 
 wss.on('connection', (ws, req) => {
@@ -156,6 +158,6 @@ app.post('/verify-otp', (req, res) => {
 });
 
 // Start server
-app.listen(port, () => {
+server.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
