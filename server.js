@@ -47,10 +47,24 @@ wss.on('connection', (ws, req) => {
 
 // Nodemailer setup for Gmail SMTP
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587, // Use 587 for STARTTLS
+  secure: false, // false for 587 (STARTTLS), true for 465 (SSL)
   auth: {
-    user: 'gamer.lkg.2.0@gmail.com',
-    pass: 'cebfgxqlgroycxlc' // Replace with new 16-character App Password
+    user: process.env.EMAIL_USER || 'gamer.lkg.2.0@gmail.com', // Fallback for local testing
+    pass: process.env.EMAIL_PASS || 'cebfgxqlgroycxlc' // Replace with your App Password
+  },
+  tls: {
+    rejectUnauthorized: false // Helps with cert issues on Render
+  }
+});
+
+// Verify transporter on startup
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('SMTP Verification Error:', error);
+  } else {
+    console.log('SMTP Server ready to send emails');
   }
 });
 
@@ -75,6 +89,7 @@ app.post('/register', (req, res) => {
     [userId, phone, email],
     function (err) {
       if (err) {
+        console.error('Register Error:', err);
         return res.status(400).json({ error: 'User already exists' });
       }
       res.json({ message: 'User registered' });
@@ -91,6 +106,7 @@ app.post('/send-otp', (req, res) => {
 
   db.get(`SELECT * FROM users WHERE userId = ?`, [userId], (err, user) => {
     if (err || !user) {
+      console.error('User Query Error:', err);
       return res.status(404).json({ error: 'User not found' });
     }
 
@@ -103,6 +119,7 @@ app.post('/send-otp', (req, res) => {
       [userId, otp, createdAt, expiresAt],
       (err) => {
         if (err) {
+          console.error('OTP Storage Error:', err);
           return res.status(500).json({ error: 'Failed to store OTP' });
         }
 
@@ -112,16 +129,26 @@ app.post('/send-otp', (req, res) => {
           res.json({ message: 'OTP sent via push' });
         } else if (method === 'email') {
           const mailOptions = {
-            from: 'gamer.lkg.2.0@gmail.com',
+            from: `"OTP Service" <${process.env.EMAIL_USER || 'gamer.lkg.2.0@gmail.com'}>`,
             to: user.email,
             subject: 'Your OTP Code',
-            text: `Your OTP is ${otp}. It expires at ${new Date(expiresAt).toLocaleString()}.`
+            text: `Your OTP is ${otp}. It expires at ${new Date(expiresAt).toLocaleString()}.`,
+            html: `
+              <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4;">
+                <h2 style="color: #333;">Your OTP Code</h2>
+                <p>Your OTP is <strong style="color: #007bff;">${otp}</strong>.</p>
+                <p>It expires at <em>${new Date(expiresAt).toLocaleString()}</em>.</p>
+                <p style="color: #555;">Please do not share this code.</p>
+              </div>
+            `
           };
-          transporter.sendMail(mailOptions, (error) => {
+
+          transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
-              console.error('Email error:', error);
-              return res.status(500).json({ error: 'Failed to send email' });
+              console.error('Email Send Error:', error);
+              return res.status(500).json({ error: 'Failed to send email', details: error.message });
             }
+            console.log('Email sent:', info.response);
             res.json({ message: 'OTP sent via email' });
           });
         } else {
@@ -144,10 +171,12 @@ app.post('/verify-otp', (req, res) => {
     [userId, otp, Date.now()],
     (err, row) => {
       if (err || !row) {
+        console.error('OTP Verification Error:', err);
         return res.status(400).json({ error: 'Invalid or expired OTP' });
       }
       db.run(`DELETE FROM otps WHERE id = ?`, [row.id], (err) => {
         if (err) {
+          console.error('OTP Deletion Error:', err);
           return res.status(500).json({ error: 'Failed to clear OTP' });
         }
         res.json({ message: 'OTP verified' });
@@ -157,6 +186,6 @@ app.post('/verify-otp', (req, res) => {
 });
 
 // Start server
-server.listen(port, () => {
+server.listen(port, '0.0.0.0', () => { // Bind to 0.0.0.0 for Render
   console.log(`Server running on port ${port}`);
 });
