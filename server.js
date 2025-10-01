@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const WebSocket = require('ws');
 const nodemailer = require('nodemailer');
+const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -9,8 +11,15 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 app.use('/apk', express.static('static'));
 
-// In-memory SQLite database
-const db = new sqlite3.Database(':memory:');
+// Persistent SQLite database
+const dbPath = path.join(__dirname, 'data', 'mydb.db');
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Database connection error:', err);
+  } else {
+    console.log('Connected to SQLite database at data/mydb.db');
+  }
+});
 
 // Initialize database schema
 db.serialize(() => {
@@ -48,13 +57,14 @@ wss.on('connection', (ws, req) => {
 // Nodemailer setup for Gmail SMTP
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 587, // Use 587 for STARTTLS
-  secure: false, // false for 587 (STARTTLS), true for 465 (SSL)
+  port: 587,
+  secure: false,
   auth: {
-    user: process.env.EMAIL_USER || 'gamer.lkg.2.0@gmail.com', // Fallback for local testing
-    pass: process.env.EMAIL_PASS   },
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
   tls: {
-    rejectUnauthorized: false // Helps with cert issues on Render
+    rejectUnauthorized: false
   }
 });
 
@@ -128,7 +138,7 @@ app.post('/send-otp', (req, res) => {
           res.json({ message: 'OTP sent via push' });
         } else if (method === 'email') {
           const mailOptions = {
-            from: `"OTP Service" <${process.env.EMAIL_USER || 'gamer.lkg.2.0@gmail.com'}>`,
+            from: `"OTP Service" <${process.env.EMAIL_USER}>`,
             to: user.email,
             subject: 'Your OTP Code',
             text: `Your OTP is ${otp}. It expires at ${new Date(expiresAt).toLocaleString()}.`,
@@ -185,6 +195,6 @@ app.post('/verify-otp', (req, res) => {
 });
 
 // Start server
-server.listen(port, '0.0.0.0', () => { // Bind to 0.0.0.0 for Render
+server.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
 });
