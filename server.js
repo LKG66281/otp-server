@@ -52,8 +52,7 @@ const transporter = nodemailer.createTransport({
   secure: false, // false for 587 (STARTTLS), true for 465 (SSL)
   auth: {
     user: process.env.EMAIL_USER || 'gamer.lkg.2.0@gmail.com', // Fallback for local testing
-    pass: process.env.EMAIL_PASS || 'cebfgxqlgroycxlc' // Replace with your App Password
-  },
+    pass: process.env.EMAIL_PASS   },
   tls: {
     rejectUnauthorized: false // Helps with cert issues on Render
   }
