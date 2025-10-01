@@ -1,14 +1,16 @@
 {
   "name": "otp-server",
   "version": "1.0.0",
-  "description": "OTP server with WebSocket and Gmail SMTP",
+  "description": "OTP Server for sending and verifying OTPs via email and WebSocket",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "lKG-Yadav",
+  "author": "lkg66281",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.17.1",
     "nodemailer": "^6.7.0",
     "sqlite3": "^5.0.0",
